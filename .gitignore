@@ -1,0 +1,21 @@
+# Build output
+build/
+
+# Compiled GSettings schemas
+build/schemas/
+schemas/
+
+# Compiled resource files
+build/resources/
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dev notes (not project content)
+*.md~
