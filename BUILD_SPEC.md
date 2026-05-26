@@ -122,255 +122,60 @@ GtkGrid (vertical)
 
 ## 4. REMAINING FEATURES
 
-### 4.1 Feature 2: Combined Explorer Sidebar ❌
+### 4.1 Feature 2: Combined Explorer Sidebar ✅
 
 **Goal:** Create a new sidebar type "explorer" that combines both the places (bookmarks, devices) and the tree sidebar into a single scrollable panel, like Windows Explorer's navigation pane.
 
-**Architecture decision:**
-Option chosen: **New sidebar type "explorer"** — not modifying existing places or tree sidebars. This avoids breaking the original modes.
+**Architecture:** A single GtkScrolledWindow contains both the full NemoPlacesSidebar (top, fixed height) and the full FMTreeView (bottom, expands to fill space), separated by a GtkSeparator. Both child widgets have their internal scrolling disabled (GTK_POLICY_NEVER) so the sidebar scrolls as one unified panel. Both widgets retain their full signal connectivity — the tree responds to window navigation regardless of origin.
 
-#### 4.1.1 New Files
-
-**`src/src/nemo-explorer-sidebar.c`** — New GObject widget (GtkBox, VERTICAL):
 ```
 NemoExplorerSidebar (GtkBox, VERTICAL)
-├── GtkScrolledWindow
-│   ├── Places section
-│   │   ├── Favorites/Bookmarks (top)
-│   │   │   — Use NemoBookmarkList + volume monitor
-│   │   │   — Drag-and-drop reordering
-│   │   ├── GtkSeparator
-│   │   └── Devices/Network section
-│   │       — Mounted volumes
-│   │       — Network locations
-│   ├── GtkSeparator
-│   └── Tree section (bottom, expands to fill remaining space)
-│       └── FMTreeView — populate from model via fm_tree_model_get_default()
+└── GtkScrolledWindow (POLICY_NEVER, POLICY_AUTOMATIC)
+    └── GtkBox (VERTICAL)
+        ├── NemoPlacesSidebar — POLICY_NEVER, FALSE/FALSE pack
+        ├── GtkSeparator
+        └── FMTreeView — POLICY_NEVER, TRUE/TRUE pack
 ```
 
-**`src/src/nemo-explorer-sidebar.h`** — Public header:
-```c
-#define NEMO_TYPE_EXPLORER_SIDEBAR (nemo_explorer_sidebar_get_type())
-G_DECLARE_FINAL_TYPE (NemoExplorerSidebar, nemo_explorer_sidebar,
-                      NEMO, EXPLORER_SIDEBAR, GtkBox)
-GtkWidget * nemo_explorer_sidebar_new (NemoWindow *window);
-```
+This approach reuses 100% of the proven NemoPlacesSidebar and FMTreeView widgets rather than building a bespoke places list and tree from scratch. The shared scrolled window gives the unified-scroll behavior of Windows Explorer's navigation pane.
 
-#### 4.1.2 Implementation Tasks
+#### 4.1.1 Files
 
-**Task 1: Create the widget skeleton**
-- Create `nemo-explorer-sidebar.c` with `G_DEFINE_TYPE_WITH_PRIVATE`
-- Create `nemo-explorer-sidebar.h` with proper macros
-- Implement `_init()`: create vertical GtkBox, add GtkScrolledWindow
-- Implement `_new(window)`: pass window pointer to private struct
-- Add to `nemoCommon_sources` in `src/src/meson.build`
+**`src/src/nemo-explorer-sidebar.c`** — 155-line GObject widget (GtkBox, VERTICAL):
+- `_init()`: creates the outer GtkScrolledWindow and content GtkBox
+- `_new(window)`: creates places sidebar, separator, tree sidebar; disables internal scrolling on both; packs into content box
+- `_dispose()`: clears child widget references
 
-**Task 2: Add places section**
-- In `_init()`: create the places GtkBox (VERTICAL) inside scrolled window
-- Add header label "Quick access" (like Windows)
-- Import `NemoBookmarkList` from `nemo-bookmark-list.h`
-- Use `nemo_bookmark_list_new()` and populate
-- Connect signals: bookmark click → navigate in window
-- Add volume monitor: use `g_volume_monitor_get()` to list drives
-- Reference: `nemo-places-sidebar.c` for bookmark list patterns
+**`src/src/nemo-explorer-sidebar.h`** — Public header (unchanged)
 
-**Task 3: Add tree section**
-- Create FMTreeView below a GtkSeparator
-- Use `fm_tree_view_new()` from `nemo-tree-sidebar.h`
-- Call `fm_tree_view_set_parent_window(tree_view, window)` to wire navigation
-- Set `vexpand = TRUE` so tree fills remaining space
-- Reference: `nemo-tree-sidebar.c` setup code
+#### 4.1.2 Implementation Tasks (all complete)
 
-**Task 4: Wire into sidebar system**
-In `src/src/nemo-window.c`:
-- Add `#include "nemo-explorer-sidebar.h"`
-- Extend `sidebar_id_is_valid()` to accept `NEMO_WINDOW_SIDEBAR_EXPLORER`
-- Add `else if` branch in `nemo_window_set_up_sidebar()` to instantiate `nemo_explorer_sidebar_new(window)`
+1. ✅ Create the widget skeleton — G_DEFINE_TYPE_WITH_PRIVATE, dispose, class_init, init
+2. ✅ Create shared GtkScrolledWindow + content GtkBox in _init()
+3. ✅ In _new(): create places sidebar, disable internal scrolling, pack FALSE/FALSE
+4. ✅ Add GtkSeparator between places and tree
+5. ✅ In _new(): create tree sidebar (FMTreeView), disable internal scrolling, pack TRUE/TRUE
+6. ✅ Wire into sidebar system: sidebar_id_is_valid, set_up_sidebar, menus, GSettings, XML
+7. ✅ Add to nemoCommon_sources in meson.build
 
-In `src/src/nemo-window.h`:
-- Add constant: `#define NEMO_WINDOW_SIDEBAR_EXPLORER "explorer"`
+#### 4.1.3 Wiring Checklist
 
-In `src/src/nemo-window-menus.c`:
-- Add `SIDEBAR_EXPLORER` to the `SidebarRadio` enum
-- Add entry in `sidebar_radio_entries[]` array:
-```c
-{ "explorer", N_("E_xplorer"), N_("Show combined places and tree sidebar"),
-  NEMO_WINDOW_SIDEBAR_EXPLORER, SIDEBAR_EXPLORER },
-```
-
-In `src/gresources/nemo-shell-ui.xml`:
-- Add `<menuitem>` inside the `<placeholder name='Sidebar Radio Placeholder'>` block
-
-In `src/libnemo-private/org.nemo.gschema.xml`:
-- Add `'explorer'` to the `<choices>` for `side-pane-view` key
-
-#### 4.1.3 Wiring Checklist for New Sidebar Type
-
-| Step | File | Change |
-|------|------|--------|
-| 1 | nemo-explorer-sidebar.c | New widget implementation |
-| 2 | nemo-explorer-sidebar.h | Public header |
-| 3 | src/meson.build | Add to nemoCommon_sources |
-| 4 | nemo-window.h | Add SIDEBAR_EXPLORER constant |
-| 5 | nemo-window.c | Extend sidebar_id_is_valid(), add set_up case |
-| 6 | nemo-window-menus.c | Add enum, menu entry |
-| 7 | nemo-shell-ui.xml | Add `<menuitem>` |
-| 8 | org.nemo.gschema.xml | Add 'explorer' to choices |
+| Step | File | Change | Status |
+|------|------|--------|--------|
+| 1 | nemo-explorer-sidebar.c | Composite widget implementation | ✅ |
+| 2 | nemo-explorer-sidebar.h | Public header | ✅ |
+| 3 | src/meson.build | Add to nemoCommon_sources | ✅ |
+| 4 | nemo-window.h | Add SIDEBAR_EXPLORER constant | ✅ |
+| 5 | nemo-window.c | Extend sidebar_id_is_valid(), add set_up case | ✅ |
+| 6 | nemo-window-menus.c | Add enum, menu entry | ✅ |
+| 7 | nemo-shell-ui.xml | Add `<menuitem>` | ✅ |
+| 8 | org.nemo.gschema.xml | Add 'explorer' to choices | ✅ |
 
 ---
 
-### 4.2 Feature 3: Windows CSS Theme ❌
+### 4.2 Feature 3: Windows CSS Theme ❌ (dropped)
 
-**Goal:** Apply a GTK CSS stylesheet at startup that makes Nemo look like Windows 11 File Explorer.
-
-#### 4.2.1 Design Tokens — Windows 11 Explorer
-
-```css
-/* Colors */
---explorer-bg:           #fafafa;      /* Main background - Windows light */
---explorer-sidebar-bg:   #f0f0f0;      /* Sidebar background - slightly darker */
---explorer-sidebar-hover:#e5e5e5;      /* Sidebar item hover */
---explorer-sidebar-active:#cccccc;     /* Sidebar item selected */
---explorer-toolbar-bg:   #f5f5f5;      /* Toolbar/ribbon background */
---explorer-text:         #1a1a1a;      /* Primary text */
---explorer-text-secondary:#666666;     /* Secondary text */
---explorer-accent:       #005fb8;      /* Windows accent blue */
---explorer-border:       #e0e0e0;      /* Panel borders */
---explorer-separator:    #d0d0d0;      /* Separator lines */
---explorer-path-bg:      #ffffff;      /* Breadcrumb pathbar background */
---explorer-path-border:  #d0d0d0;      /* Pathbar border */
---explorer-list-hover:   #e8f0fe;      /* File list row hover (light blue) */
---explorer-list-select:  #cce4f7;      /* File list row selected */
---explorer-preview-bg:   #fafafa;      /* Preview panel background */
---explorer-preview-label:#999999;      /* Preview panel labels */
-
-/* Typography */
---font-ui: "Segoe UI", "Cantarell", "Noto Sans", sans-serif;
---font-mono: "Cascadia Code", "Consolas", monospace;
---font-size-ui: 12px;
---font-size-heading: 14px;
-
-/* Spacing */
---sidebar-item-padding: 4px 8px;
---sidebar-item-height: 24px;
---toolbar-height: 40px;
---pathbar-height: 32px;
---panel-border-width: 1px;
-
-/* Effects */
---transition-fast: 100ms ease;
---transition-normal: 200ms ease;
---sidebar-radius: 4px;
-```
-
-#### 4.2.2 New File
-
-**`src/data/nemo-windows.css`** — CSS stylesheet (200-300 lines)
-
-Key targets and CSS selectors:
-
-```css
-/* === SIDEBAR === */
-.nemo-places-sidebar { background: @explorer-sidebar-bg; }
-.nemo-places-sidebar row { padding: 4px 8px; min-height: 24px; border-radius: 4px; }
-.nemo-places-sidebar row:hover { background: @explorer-sidebar-hover; }
-.nemo-places-sidebar row:selected { background: @explorer-sidebar-active; }
-
-/* === TREE SIDEBAR ARROWS === */
-.nemo-tree-sidebar { background: @explorer-sidebar-bg; }
-treeview.view { background: transparent; }
-treeview.view:hover { background: @explorer-sidebar-hover; }
-treeview.view:selected { background: @explorer-sidebar-active; color: @explorer-text; }
-treeview expander {
-    -gtk-icon-source: -gtk-icontheme("pan-end-symbolic");
-    min-width: 16px; min-height: 16px;
-}
-treeview expander:checked {
-    -gtk-icon-source: -gtk-icontheme("pan-down-symbolic");
-}
-
-/* === TOOLBAR === */
-.nemo-toolbar { background: @explorer-toolbar-bg; border-bottom: 1px solid @explorer-border; min-height: 40px; }
-.nemo-toolbar button { padding: 4px 10px; border-radius: 4px; }
-.nemo-toolbar button:hover { background: @explorer-sidebar-hover; }
-
-/* === PATHBAR (breadcrumb) === */
-.nemo-pathbar { background: @explorer-path-bg; border: 1px solid @explorer-path-border; border-radius: 4px; }
-.nemo-pathbar button { padding: 2px 8px; border-radius: 3px; }
-.nemo-pathbar button:hover { background: @explorer-sidebar-hover; }
-
-/* === STATUS BAR === */
-.nemo-statusbar { background: @explorer-toolbar-bg; border-top: 1px solid @explorer-border; padding: 0 8px; }
-.nemo-statusbar label { font-size: 11px; color: @explorer-text-secondary; }
-
-/* === FILE LIST === */
-.nemo-icon-view { background: @explorer-bg; }
-view row:hover { background: @explorer-list-hover; }
-view row:selected { background: @explorer-list-select; color: @explorer-text; }
-view row { min-height: 24px; padding: 2px 4px; }
-
-/* === PREVIEW PANEL === */
-.nemo-preview-panel { background: @explorer-preview-bg; border-left: 1px solid @explorer-border; }
-.nemo-preview-panel label { font-size: 12px; color: @explorer-text-secondary; }
-.nemo-preview-panel GtkLabel:first-child { font-size: 14px; font-weight: bold; color: @explorer-text; }
-
-/* === MENU BAR === */
-menubar { background: @explorer-bg; border-bottom: 1px solid @explorer-border; padding: 0; }
-menubar > menuitem { padding: 4px 8px; }
-menubar > menuitem:hover { background: @explorer-sidebar-hover; border-radius: 4px; }
-
-/* === SCROLLBAR === */
-scrollbar slider { background: #c0c0c0; border-radius: 8px; min-width: 8px; }
-scrollbar slider:hover { background: #a0a0a0; }
-
-/* === SEPARATOR === */
-separator { color: @explorer-separator; }
-```
-
-#### 4.2.3 Application Startup Injection
-
-In `src/src/nemo-application.c`, add to the startup function:
-
-```c
-/* Apply Windows-style CSS theme */
-static void
-load_windows_theme (void)
-{
-    GtkCssProvider *provider;
-    GFile *css_file;
-    gchar *css_path;
-
-    /* Look for CSS in data dir relative to build root */
-    css_path = g_build_filename (DATADIR, "nemo-windows.css", NULL);
-
-    css_file = g_file_new_for_path (css_path);
-    if (g_file_query_exists (css_file, NULL)) {
-        provider = gtk_css_provider_new ();
-        gtk_css_provider_load_from_file (provider, css_file, NULL);
-        gtk_style_context_add_provider_for_screen (
-            gdk_screen_get_default (),
-            GTK_STYLE_PROVIDER (provider),
-            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        g_object_unref (provider);
-    }
-
-    g_object_unref (css_file);
-    g_free (css_path);
-}
-```
-
-Call `load_windows_theme()` in the `nemo_application_startup()` function.
-
-#### 4.2.4 CSS Data Installation
-
-In `src/data/meson.build`, add the CSS file to the data installation:
-
-```meson
-install_data(
-    'nemo-windows.css',
-    install_dir: pkgdatadir,
-)
-```
+**Status:** Dropped per user decision (2026-05-25). Focus is on Features 1 and 2 only.
 
 ---
 
@@ -379,18 +184,13 @@ install_data(
 ```
 Feature 2 — Combined Explorer Sidebar:
   1.  src/src/nemo-explorer-sidebar.h           ← Header (macros, typedef, public API)
-  2.  src/src/nemo-explorer-sidebar.c           ← Implementation (widget, places, tree)
+  2.  src/src/nemo-explorer-sidebar.c           ← Composite widget implementation
   3.  [modify] src/src/nemo-window.h            ← Add SIDEBAR_EXPLORER constant
   4.  [modify] src/src/nemo-window.c            ← Extend sidebar_id_is_valid + set_up
   5.  [modify] src/src/nemo-window-menus.c      ← Add enum, menu entry
   6.  [modify] src/gresources/nemo-shell-ui.xml ← Add <menuitem>
   7.  [modify] src/libnemo-private/org.nemo.gschema.xml ← Add to choices
   8.  [modify] src/src/meson.build              ← Add to nemoCommon_sources
-
-Feature 3 — Windows CSS Theme:
-  9.  src/data/nemo-windows.css                 ← Full CSS stylesheet
-  10. [modify] src/src/nemo-application.c       ← Load CSS at startup
-  11. [modify] src/data/meson.build             ← Install CSS to data dir
 ```
 
 ---
@@ -499,17 +299,16 @@ void      nemo_file_list_free         (GList *file_list);
 ## 9. QUALITY GATES (all must pass before done)
 
 ```
-[ ] ninja -j4            — 0 errors, 0 warnings
-[ ] ./compile-schema.sh  — schema compiles without errors
-[ ] Binary starts        — GSETTINGS_SCHEMA_DIR=$(pwd)/build/schemas ./build/src/nemo ~
-[ ] Preview panel        — Alt+P toggles, file selection updates preview
-[ ] Explorer sidebar     — View → Explorer shows combined places+tree
-[ ] Sidebar navigation   — Click bookmark → navigates content area
-[ ] Tree navigation      — Expand/collapse, click → navigate
-[ ] Sidebar persistence  — Selection remembered after closing and reopening window
-[ ] CSS theme visible    — Verify visually: menu bar, toolbar, sidebar, status bar match spec
-[ ] No regressions       — Places sidebar still works, tree sidebar still works
-[ ] Preview panel + CSS  — Preview panel styling matches theme
+|[ ] ninja -j4            — 0 errors, 0 warnings
+|[ ] ./compile-schema.sh  — schema compiles without errors
+|[ ] Binary starts        — GSETTINGS_SCHEMA_DIR=$(pwd)/build/schemas ./build/src/nemo ~
+|[ ] Preview panel        — Alt+P toggles, file selection updates preview
+|[ ] Explorer sidebar     — View → Explorer shows combined places+tree
+|[ ] Sidebar navigation   — Click bookmark → navigates content area
+|[ ] Tree navigation      — Expand/collapse, click → navigate
+|[ ] Sidebar persistence  — Selection remembered after closing and reopening window
+|[ ] No regressions       — Places sidebar still works, tree sidebar still works
+|[ ] Preview panel + sidebar coexist — Both features work simultaneously
 ```
 
 ---
