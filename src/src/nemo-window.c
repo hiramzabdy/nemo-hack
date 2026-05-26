@@ -40,6 +40,7 @@
 #include "nemo-notebook.h"
 #include "nemo-places-sidebar.h"
 #include "nemo-tree-sidebar.h"
+#include "nemo-explorer-sidebar.h"
 #include "nemo-preview-panel.h"
 #include "nemo-view-factory.h"
 #include "nemo-window-manage-views.h"
@@ -475,6 +476,8 @@ nemo_window_set_up_sidebar (NemoWindow *window)
         sidebar = nemo_places_sidebar_new (window);
     } else if (g_strcmp0 (window->details->sidebar_id, NEMO_WINDOW_SIDEBAR_TREE) == 0) {
         sidebar = nemo_tree_sidebar_new (window);
+    } else if (g_strcmp0 (window->details->sidebar_id, NEMO_WINDOW_SIDEBAR_EXPLORER) == 0) {
+        sidebar = nemo_explorer_sidebar_new (window);
     } else {
         g_assert_not_reached ();
     }
@@ -604,7 +607,8 @@ static gboolean
 sidebar_id_is_valid (const gchar *sidebar_id)
 {
     return (g_strcmp0 (sidebar_id, NEMO_WINDOW_SIDEBAR_PLACES) == 0 ||
-            g_strcmp0 (sidebar_id, NEMO_WINDOW_SIDEBAR_TREE) == 0);
+            g_strcmp0 (sidebar_id, NEMO_WINDOW_SIDEBAR_TREE) == 0 ||
+            g_strcmp0 (sidebar_id, NEMO_WINDOW_SIDEBAR_EXPLORER) == 0);
 }
 
 static void

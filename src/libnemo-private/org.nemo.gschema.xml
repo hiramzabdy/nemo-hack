@@ -708,6 +708,7 @@
       <choices>
 	<choice value='places'/>
 	<choice value='tree'/>
+	<choice value='explorer'/>
       </choices>
       <aliases>
 	<alias value='NemoPlacesSidebar' target='places'/>

@@ -60,6 +60,7 @@
 			<menu action="Sidebar List">
 				<menuitem name="Sidebar Places" action="Sidebar Places"/>
 				<menuitem name="Sidebar Tree" action="Sidebar Tree"/>
+				<menuitem name="Sidebar Explorer" action="Sidebar Explorer"/>
 				<separator/>
 				<menuitem name="Show Hide Sidebar" action="Show Hide Sidebar"/>
 			</menu>

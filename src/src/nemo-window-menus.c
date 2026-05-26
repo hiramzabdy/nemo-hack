@@ -84,6 +84,7 @@ enum {
     COMPACT_VIEW,
     SIDEBAR_PLACES,
     SIDEBAR_TREE,
+    SIDEBAR_EXPLORER,
     TOOLBAR_PATHBAR,
     TOOLBAR_ENTRY
 };
@@ -693,6 +694,9 @@ sidebar_radio_entry_changed_cb (GtkAction *action,
         case SIDEBAR_TREE:
             nemo_window_set_sidebar_id (window, NEMO_WINDOW_SIDEBAR_TREE);
             break;
+        case SIDEBAR_EXPLORER:
+            nemo_window_set_sidebar_id (window, NEMO_WINDOW_SIDEBAR_EXPLORER);
+            break;
         default:
             ;
             break;
@@ -770,6 +774,8 @@ sidebar_id_to_value (const gchar *sidebar_id)
 
 	if (g_strcmp0 (sidebar_id, NEMO_WINDOW_SIDEBAR_TREE) == 0)
 		retval = SIDEBAR_TREE;
+	else if (g_strcmp0 (sidebar_id, NEMO_WINDOW_SIDEBAR_EXPLORER) == 0)
+		retval = SIDEBAR_EXPLORER;
 
 	return retval;
 }
@@ -1606,7 +1612,10 @@ static const GtkRadioActionEntry sidebar_radio_entries[] = {
 	  SIDEBAR_PLACES },
 	{ "Sidebar Tree", NULL,
 	  N_("Tree"), NULL, N_("Select Tree as the default sidebar"),
-	  SIDEBAR_TREE }
+	  SIDEBAR_TREE },
+	{ "Sidebar Explorer", NULL,
+	  N_("E_xplorer"), NULL, N_("Show combined places and tree sidebar"),
+	  SIDEBAR_EXPLORER }
 };
 
 static const GtkRadioActionEntry view_radio_entries[] = {

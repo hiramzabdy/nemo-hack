@@ -74,6 +74,7 @@ enum {
 
 #define NEMO_WINDOW_SIDEBAR_PLACES "places"
 #define NEMO_WINDOW_SIDEBAR_TREE "tree"
+#define NEMO_WINDOW_SIDEBAR_EXPLORER "explorer"
 
 typedef struct NemoWindowDetails NemoWindowDetails;
 
