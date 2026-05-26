@@ -545,7 +545,7 @@
 
   <schema id="org.nemo.sidebar-panels.tree" path="/org/nemo/sidebar-panels/tree/" gettext-domain="nemo">
     <key name="show-only-directories" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Only show folders in the tree side pane</summary>
       <description>If set to true, Nemo will only show folders in the tree side pane. Otherwise it will show both folders and files.</description>
     </key>

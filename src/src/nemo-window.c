@@ -409,6 +409,9 @@ preview_paned_position_changed_cb (GtkPaned *paned,
     g_settings_set_int (nemo_window_state,
                         NEMO_WINDOW_STATE_PREVIEW_PANEL_WIDTH,
                         preview_width);
+
+    /* Real-time image rescaling during paned drag */
+    nemo_preview_panel_rescale (NEMO_PREVIEW_PANEL (window->details->preview_panel));
 }
 
 /* side pane helpers */

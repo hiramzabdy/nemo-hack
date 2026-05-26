@@ -603,17 +603,55 @@ nemo_preview_panel_set_file (NemoPreviewPanel *panel, NemoFile *file)
 void
 nemo_preview_panel_clear (NemoPreviewPanel *panel)
 {
-    g_return_if_fail (NEMO_IS_PREVIEW_PANEL (panel));
+	g_return_if_fail (NEMO_IS_PREVIEW_PANEL (panel));
 
-    g_clear_object (&panel->priv->full_pixbuf);
-    panel->priv->last_scaled_width = 0;
+	g_clear_object (&panel->priv->full_pixbuf);
+	panel->priv->last_scaled_width = 0;
 
-    if (panel->priv->current_file != NULL) {
-        g_object_unref (panel->priv->current_file);
-        panel->priv->current_file = NULL;
-    }
+	if (panel->priv->current_file != NULL) {
+		g_object_unref (panel->priv->current_file);
+		panel->priv->current_file = NULL;
+	}
 
-    show_placeholder (panel);
+	show_placeholder (panel);
+}
+
+/* Force a rescale of the current image to fit the panel width.
+ * Called from the window's paned position-changed callback for
+ * real-time rescaling during drag. */
+void
+nemo_preview_panel_rescale (NemoPreviewPanel *panel)
+{
+	GdkPixbuf *scaled;
+	gint avail_w;
+
+	g_return_if_fail (NEMO_IS_PREVIEW_PANEL (panel));
+
+	if (panel->priv->full_pixbuf == NULL)
+		return;
+
+	avail_w = gtk_widget_get_allocated_width (GTK_WIDGET (panel));
+	if (avail_w < 4)
+		return;
+
+	avail_w -= PREVIEW_INTERNAL_PADDING;
+	if (avail_w < 4)
+		avail_w = 4;
+
+	/* Skip redundant rescales for tiny width changes */
+	{
+		gint diff = avail_w - panel->priv->last_scaled_width;
+		if (diff > -2 && diff < 2)
+			return;
+	}
+
+	scaled = scale_pixbuf_to_width (panel->priv->full_pixbuf, avail_w);
+	if (scaled != NULL) {
+		gtk_image_set_from_pixbuf (GTK_IMAGE (panel->priv->preview_image),
+		                           scaled);
+		g_object_unref (scaled);
+		panel->priv->last_scaled_width = avail_w;
+	}
 }
 
 /* ── GObject boilerplate ─────────────────────────────────────── */
