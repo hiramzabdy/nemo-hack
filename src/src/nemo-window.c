@@ -606,6 +606,20 @@ nemo_window_get_show_preview_panel (NemoWindow *window)
     return window->details->show_preview_panel;
 }
 
+/* Show a file in the preview panel. Called from tree sidebar when
+ * the user selects a file (non-directory) in the tree. */
+void
+nemo_window_preview_file (NemoWindow *window, NemoFile *file)
+{
+    g_return_if_fail (NEMO_IS_WINDOW (window));
+
+    if (!window->details->show_preview_panel)
+        return;
+
+    nemo_preview_panel_set_file (
+        NEMO_PREVIEW_PANEL (window->details->preview_panel), file);
+}
+
 static gboolean
 sidebar_id_is_valid (const gchar *sidebar_id)
 {

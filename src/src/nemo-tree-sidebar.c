@@ -466,6 +466,18 @@ selection_changed_timer_callback(FMTreeView *view)
 	if (view->details->activation_file == NULL) {
 		return FALSE;
 	}
+
+	/* Files (non-directories): show in preview panel instead of opening.
+	 * This lets the user browse photos, documents, etc. directly from
+	 * the tree sidebar without launching external applications. */
+	if (!nemo_file_is_directory (view->details->activation_file)) {
+		nemo_window_preview_file (view->details->window,
+		                          view->details->activation_file);
+		nemo_file_unref (view->details->activation_file);
+		view->details->activation_file = NULL;
+		return FALSE;
+	}
+
 	view->details->activation_flags = 0;
 		
 	attributes = NEMO_FILE_ATTRIBUTE_INFO | NEMO_FILE_ATTRIBUTE_LINK_INFO;

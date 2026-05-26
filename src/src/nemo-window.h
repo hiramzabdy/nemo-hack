@@ -175,6 +175,8 @@ gboolean  nemo_window_get_show_sidebar (NemoWindow *window);
 void     nemo_window_set_show_preview_panel (NemoWindow *window,
                                              gboolean show);
 gboolean nemo_window_get_show_preview_panel (NemoWindow *window);
+void     nemo_window_preview_file          (NemoWindow *window,
+                                            NemoFile   *file);
 
 const gchar *nemo_window_get_ignore_meta_view_id (NemoWindow *window);
 void         nemo_window_set_ignore_meta_view_id (NemoWindow *window, const gchar *id);
