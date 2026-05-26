@@ -100,6 +100,7 @@ struct NemoWindowDetails
         GtkWidget *preview_panel;
         gboolean show_preview_panel;
         int preview_panel_width;
+        guint preview_width_handler_id;
 
         // A closed pane's location, valid until the remaining pane
         // location changes.

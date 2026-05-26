@@ -383,6 +383,20 @@ save_sidebar_width_cb (gpointer user_data)
     return FALSE;
 }
 
+static gboolean
+save_preview_width_cb (gpointer user_data)
+{
+    NemoWindow *window = user_data;
+
+    window->details->preview_width_handler_id = 0;
+
+    g_settings_set_int (nemo_window_state,
+                        NEMO_WINDOW_STATE_PREVIEW_PANEL_WIDTH,
+                        window->details->preview_panel_width);
+
+    return FALSE;
+}
+
 static void
 preview_paned_position_changed_cb (GtkPaned *paned,
                                    GParamSpec *pspec,
@@ -406,9 +420,13 @@ preview_paned_position_changed_cb (GtkPaned *paned,
     preview_width = MAX (10, total_width - gtk_paned_get_position (paned));
     window->details->preview_panel_width = preview_width;
 
-    g_settings_set_int (nemo_window_state,
-                        NEMO_WINDOW_STATE_PREVIEW_PANEL_WIDTH,
-                        preview_width);
+    /* Debounce GSettings save — writing to dconf on every pixel
+     * of drag causes UI lag. Save after 100ms of inactivity instead. */
+    if (window->details->preview_width_handler_id != 0) {
+        g_source_remove (window->details->preview_width_handler_id);
+    }
+    window->details->preview_width_handler_id =
+        g_timeout_add (100, save_preview_width_cb, window);
 
     /* Real-time image rescaling during paned drag */
     nemo_preview_panel_rescale (NEMO_PREVIEW_PANEL (window->details->preview_panel));
@@ -1025,6 +1043,11 @@ nemo_window_finalize (GObject *object)
 	if (window->details->sidebar_width_handler_id != 0) {
 		g_source_remove (window->details->sidebar_width_handler_id);
 		window->details->sidebar_width_handler_id = 0;
+	}
+
+	if (window->details->preview_width_handler_id != 0) {
+		g_source_remove (window->details->preview_width_handler_id);
+		window->details->preview_width_handler_id = 0;
 	}
 
     g_signal_handlers_disconnect_by_func (nemo_preferences,
