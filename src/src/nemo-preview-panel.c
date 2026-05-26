@@ -29,7 +29,11 @@
 #include <glib/gi18n.h>
 #include <string.h>
 
-#define MAX_TEXT_PREVIEW_BYTES 16384   /* ~16 KB of text preview */
+#define MAX_TEXT_PREVIEW_BYTES  16384   /* ~16 KB of text preview */
+#define MAX_IMAGE_FILE_SIZE     (50ULL * 1024 * 1024)  /* 50 MB cap */
+#define PREVIEW_ICON_LARGE_SIZE 128
+#define PREVIEW_DEFAULT_WIDTH   280
+#define PREVIEW_INTERNAL_PADDING 16
 
 struct _NemoPreviewPanelPrivate {
     GtkWidget *icon_image;
@@ -42,6 +46,12 @@ struct _NemoPreviewPanelPrivate {
     GtkWidget *metadata_grid;     /* GtkGrid for file metadata */
     GtkWidget *placeholder_label; /* "Select a file to preview" */
 
+    /* Metadata value labels (updated in-place) */
+    GtkWidget *meta_type_val;
+    GtkWidget *meta_size_val;
+    GtkWidget *meta_location_val;
+    GtkWidget *meta_info_val;
+
     GdkPixbuf *full_pixbuf;       /* full-resolution image (owned) */
     gint       last_scaled_width; /* avoid redundant rescale */
 
@@ -49,6 +59,36 @@ struct _NemoPreviewPanelPrivate {
 };
 
 G_DEFINE_TYPE_WITH_PRIVATE (NemoPreviewPanel, nemo_preview_panel, GTK_TYPE_BOX);
+
+/* ── Image scaling helper ────────────────────────────────────── */
+
+/* Scale a pixbuf to fit a target width, maintaining aspect ratio.
+ * Never upscales beyond native resolution.
+ * Returns a new pixbuf (caller must unref), or NULL on failure. */
+static GdkPixbuf *
+scale_pixbuf_to_width (GdkPixbuf *src, gint target_w)
+{
+    gint src_w, src_h;
+    gint scaled_h;
+    gdouble scale;
+
+    src_w = gdk_pixbuf_get_width (src);
+    src_h = gdk_pixbuf_get_height (src);
+
+    if (target_w > src_w)
+        target_w = src_w;
+
+    scale = (gdouble) target_w / (gdouble) src_w;
+    scaled_h = (gint) (src_h * scale);
+
+    if (scaled_h < 1)
+        scaled_h = 1;
+
+    return gdk_pixbuf_scale_simple (src, target_w, scaled_h,
+                                    GDK_INTERP_BILINEAR);
+}
+
+/* ── GObject lifecycle ───────────────────────────────────────── */
 
 static void
 nemo_preview_panel_dispose (GObject *object)
@@ -65,7 +105,10 @@ nemo_preview_panel_dispose (GObject *object)
     G_OBJECT_CLASS (nemo_preview_panel_parent_class)->dispose (object);
 }
 
-/* Add a metadata row: label on left, value on right */
+/* ── Metadata grid (created once, updated in-place) ──────────── */
+
+/* Add a metadata row: label on left, value on right.
+ * Returns the value label so the caller can update it later. */
 static GtkWidget *
 add_metadata_row (NemoPreviewPanel *panel, GtkWidget *grid,
                   const gchar *label_text, const gchar *value_text, gint row)
@@ -91,63 +134,59 @@ add_metadata_row (NemoPreviewPanel *panel, GtkWidget *grid,
     return value;
 }
 
-/* Show metadata for any file type */
+/* Show file metadata. On first call, creates the grid and stores
+ * value label pointers. Subsequent calls just update the labels. */
 static void
 show_file_metadata (NemoPreviewPanel *panel)
 {
     NemoFile *file = panel->priv->current_file;
-    gchar *size_str = NULL;
-    gchar *uri = NULL;
-    gchar *type_str = NULL;
+    gchar *str;
     goffset size;
-    gint row = 0;
 
-    /* Clear old metadata */
-    if (panel->priv->metadata_grid != NULL) {
-        gtk_widget_destroy (panel->priv->metadata_grid);
-        panel->priv->metadata_grid = NULL;
+    if (G_UNLIKELY (panel->priv->metadata_grid == NULL)) {
+        panel->priv->metadata_grid = gtk_grid_new ();
+        gtk_grid_set_row_spacing (GTK_GRID (panel->priv->metadata_grid), 6);
+        gtk_grid_set_column_spacing (GTK_GRID (panel->priv->metadata_grid), 8);
+        gtk_container_set_border_width (GTK_CONTAINER (panel->priv->metadata_grid), 8);
+
+        panel->priv->meta_type_val = add_metadata_row (panel,
+            panel->priv->metadata_grid, _("Type:"), "", 0);
+        panel->priv->meta_size_val = add_metadata_row (panel,
+            panel->priv->metadata_grid, _("Size:"), "", 1);
+        panel->priv->meta_location_val = add_metadata_row (panel,
+            panel->priv->metadata_grid, _("Location:"), "", 2);
+        panel->priv->meta_info_val = add_metadata_row (panel,
+            panel->priv->metadata_grid, _("Info:"), "", 3);
+
+        gtk_box_pack_start (GTK_BOX (panel), panel->priv->metadata_grid,
+                            FALSE, FALSE, 2);
     }
 
-    panel->priv->metadata_grid = gtk_grid_new ();
-    gtk_grid_set_row_spacing (GTK_GRID (panel->priv->metadata_grid), 6);
-    gtk_grid_set_column_spacing (GTK_GRID (panel->priv->metadata_grid), 8);
-    gtk_container_set_border_width (GTK_CONTAINER (panel->priv->metadata_grid), 8);
+    /* Update values in-place */
+    str = nemo_file_get_mime_type (file);
+    gtk_label_set_text (GTK_LABEL (panel->priv->meta_type_val),
+                        str ? str : _("Unknown"));
+    g_free (str);
 
-    /* Type */
-    type_str = nemo_file_get_mime_type (file);
-    add_metadata_row (panel, panel->priv->metadata_grid,
-                      _("Type:"), type_str, row++);
-    g_free (type_str);
-
-    /* Size */
     size = nemo_file_get_size (file);
-    size_str = g_format_size (size);
-    add_metadata_row (panel, panel->priv->metadata_grid,
-                      _("Size:"), size_str, row++);
-    g_free (size_str);
+    str = g_format_size (size);
+    gtk_label_set_text (GTK_LABEL (panel->priv->meta_size_val), str);
+    g_free (str);
 
-    /* Location URI */
-    uri = nemo_file_get_uri (file);
-    add_metadata_row (panel, panel->priv->metadata_grid,
-                      _("Location:"), uri, row++);
-    g_free (uri);
+    str = nemo_file_get_uri (file);
+    gtk_label_set_text (GTK_LABEL (panel->priv->meta_location_val),
+                        str ? str : "");
+    g_free (str);
 
-    /* Modified date — use description as fallback */
-    {
-        gchar *desc = nemo_file_get_description (file);
-        if (desc != NULL && desc[0] != '\0') {
-            add_metadata_row (panel, panel->priv->metadata_grid,
-                              _("Info:"), desc, row++);
-        }
-        g_free (desc);
-    }
+    str = nemo_file_get_description (file);
+    gtk_label_set_text (GTK_LABEL (panel->priv->meta_info_val),
+                        (str != NULL && str[0] != '\0') ? str : "");
+    g_free (str);
 
-    gtk_box_pack_start (GTK_BOX (panel), panel->priv->metadata_grid,
-                        FALSE, FALSE, 2);
     gtk_widget_show_all (panel->priv->metadata_grid);
 }
 
-/* --- Image preview with dynamic scaling --- */
+/* ── Image preview with dynamic scaling ──────────────────────── */
 
 static void
 preview_image_size_allocate_cb (GtkWidget *widget,
@@ -155,42 +194,23 @@ preview_image_size_allocate_cb (GtkWidget *widget,
                                 NemoPreviewPanel *panel)
 {
     GdkPixbuf *scaled;
-    gint avail_w, avail_h;
-    gint img_w, img_h;
-    gdouble scale;
+    gint avail_w;
 
-    if (panel->priv->full_pixbuf == NULL) {
+    if (panel->priv->full_pixbuf == NULL)
         return;
-    }
 
     avail_w = allocation->width;
-    if (avail_w < 4) {
+    if (avail_w < 4)
         return; /* too small, not realized yet */
-    }
 
     /* Avoid redundant rescaling for minor size changes */
     {
         gint diff = avail_w - panel->priv->last_scaled_width;
-        if (diff > -3 && diff < 3) {
+        if (diff > -3 && diff < 3)
             return;
-        }
     }
 
-    img_w = gdk_pixbuf_get_width (panel->priv->full_pixbuf);
-    img_h = gdk_pixbuf_get_height (panel->priv->full_pixbuf);
-
-    /* Scale to fit the available width, maintaining aspect ratio.
-     * No height limit — the outer scrolled window handles vertical overflow.
-     * Do not upscale beyond native resolution. */
-    if (avail_w > img_w) avail_w = img_w;
-    scale = (gdouble) avail_w / (gdouble) img_w;
-    avail_h = (gint) (img_h * scale);
-
-    if (avail_h < 1) avail_h = 1;
-
-    scaled = gdk_pixbuf_scale_simple (panel->priv->full_pixbuf,
-                                      avail_w, avail_h,
-                                      GDK_INTERP_BILINEAR);
+    scaled = scale_pixbuf_to_width (panel->priv->full_pixbuf, avail_w);
 
     if (scaled != NULL) {
         gtk_image_set_from_pixbuf (GTK_IMAGE (panel->priv->preview_image),
@@ -214,18 +234,39 @@ show_image_preview (NemoPreviewPanel *panel)
     panel->priv->last_scaled_width = 0;
 
     gfile = nemo_file_get_location (file);
-    if (gfile == NULL) {
+    if (gfile == NULL)
         return;
-    }
 
     local_path = g_file_get_path (gfile);
-    g_object_unref (gfile);
 
-    if (local_path == NULL) {
-        return;
+    /* Check file size before loading to avoid OOM on huge images */
+    {
+        GFileInfo *info;
+
+        info = g_file_query_info (gfile, G_FILE_ATTRIBUTE_STANDARD_SIZE,
+                                  G_FILE_QUERY_INFO_NONE, NULL, NULL);
+        if (info != NULL) {
+            goffset file_size = g_file_info_get_size (info);
+
+            g_object_unref (info);
+
+            if (file_size > MAX_IMAGE_FILE_SIZE) {
+                g_warning ("Image file too large for preview: %s "
+                           "(%" G_GUINT64_FORMAT " bytes)",
+                           local_path, (guint64) file_size);
+                g_free (local_path);
+                g_object_unref (gfile);
+                return;
+            }
+        }
     }
 
-    /* Load the FULL resolution image */
+    g_object_unref (gfile);
+
+    if (local_path == NULL)
+        return;
+
+    /* Load the full resolution image */
     panel->priv->full_pixbuf = gdk_pixbuf_new_from_file (local_path, &error);
 
     if (panel->priv->full_pixbuf != NULL) {
@@ -255,39 +296,29 @@ show_image_preview (NemoPreviewPanel *panel)
             avail_w = gtk_widget_get_allocated_width (
                 gtk_widget_get_parent (GTK_WIDGET (panel)));
         }
-        /* Fallback: if panel isn't laid out yet (freshly toggled preview),
-         * use a reasonable default so the image requests proper size. */
-        if (avail_w < 4) {
-            avail_w = 280; /* typical preview panel width */
-        }
+        /* Fallback: if panel isn't laid out yet, use default width */
+        if (avail_w < 4)
+            avail_w = PREVIEW_DEFAULT_WIDTH;
+
         if (avail_w > 4) {
-            /* Subtract internal padding (8px border each side) */
-            avail_w -= 16;
-            if (avail_w < 4) avail_w = 4;
+            GdkPixbuf *scaled;
 
-            /* Don't upscale beyond native resolution */
-            if (avail_w > img_w) avail_w = img_w;
+            avail_w -= PREVIEW_INTERNAL_PADDING;
+            if (avail_w < 4)
+                avail_w = 4;
 
-            {
-                gint avail_h = (gint) (img_h *
-                    ((gdouble) avail_w / (gdouble) img_w));
-                GdkPixbuf *scaled;
-
-                if (avail_h < 1) avail_h = 1;
-                scaled = gdk_pixbuf_scale_simple (panel->priv->full_pixbuf,
-                                                  avail_w, avail_h,
-                                                  GDK_INTERP_BILINEAR);
-                if (scaled != NULL) {
-                    gtk_image_set_from_pixbuf (
-                        GTK_IMAGE (panel->priv->preview_image), scaled);
-                    g_object_unref (scaled);
-                    panel->priv->last_scaled_width = avail_w;
-                }
+            scaled = scale_pixbuf_to_width (panel->priv->full_pixbuf,
+                                            avail_w);
+            if (scaled != NULL) {
+                gtk_image_set_from_pixbuf (
+                    GTK_IMAGE (panel->priv->preview_image), scaled);
+                g_object_unref (scaled);
+                panel->priv->last_scaled_width = avail_w;
             }
         }
 
-        /* Queue resize so the size-allocate callback fires next time
-         * and future panel resizes update the scale. */
+        /* Queue resize so the size-allocate callback fires for
+         * future panel resizes. */
         gtk_widget_queue_resize (GTK_WIDGET (panel));
     } else {
         /* Failed to load — show large icon as fallback */
@@ -299,7 +330,7 @@ show_image_preview (NemoPreviewPanel *panel)
         if (icon != NULL) {
             icon_info = gtk_icon_theme_lookup_by_gicon (
                 gtk_icon_theme_get_default (),
-                icon, 128, 0);
+                icon, PREVIEW_ICON_LARGE_SIZE, 0);
             if (icon_info != NULL) {
                 icon_pixbuf = gtk_icon_info_load_icon (icon_info, NULL);
                 if (icon_pixbuf != NULL) {
@@ -322,7 +353,8 @@ show_image_preview (NemoPreviewPanel *panel)
     g_free (local_path);
 }
 
-/* Show text file preview */
+/* ── Text file preview ───────────────────────────────────────── */
+
 static void
 show_text_preview (NemoPreviewPanel *panel)
 {
@@ -335,16 +367,14 @@ show_text_preview (NemoPreviewPanel *panel)
     GtkTextBuffer *buffer;
 
     gfile = nemo_file_get_location (file);
-    if (gfile == NULL) {
+    if (gfile == NULL)
         return;
-    }
 
     local_path = g_file_get_path (gfile);
     g_object_unref (gfile);
 
-    if (local_path == NULL) {
+    if (local_path == NULL)
         return;
-    }
 
     if (!g_file_get_contents (local_path, &contents, &length, &error)) {
         g_warning ("Failed to read text file: %s", error->message);
@@ -363,9 +393,8 @@ show_text_preview (NemoPreviewPanel *panel)
     {
         gsize i;
         for (i = 0; i < length; i++) {
-            if (contents[i] == '\0') {
+            if (contents[i] == '\0')
                 contents[i] = ' ';
-            }
         }
     }
 
@@ -383,6 +412,44 @@ show_text_preview (NemoPreviewPanel *panel)
     g_free (local_path);
 }
 
+/* ── Directory preview ───────────────────────────────────────── */
+
+static void
+show_directory_preview (NemoPreviewPanel *panel)
+{
+    GIcon *icon;
+    GtkIconInfo *icon_info;
+    GdkPixbuf *icon_pixbuf;
+
+    /* Show large folder icon */
+    icon = nemo_file_get_gicon (panel->priv->current_file, 0);
+    if (icon != NULL) {
+        icon_info = gtk_icon_theme_lookup_by_gicon (
+            gtk_icon_theme_get_default (),
+            icon, PREVIEW_ICON_LARGE_SIZE, 0);
+        if (icon_info != NULL) {
+            icon_pixbuf = gtk_icon_info_load_icon (icon_info, NULL);
+            if (icon_pixbuf != NULL) {
+                gtk_image_set_from_pixbuf (
+                    GTK_IMAGE (panel->priv->preview_image),
+                    icon_pixbuf);
+                g_object_unref (icon_pixbuf);
+            }
+            g_object_unref (icon_info);
+        }
+    }
+
+    gtk_label_set_text (GTK_LABEL (panel->priv->type_label), _("Folder"));
+
+    gtk_widget_show (panel->priv->preview_image);
+    gtk_widget_hide (panel->priv->text_scrolled);
+    gtk_widget_hide (panel->priv->placeholder_label);
+
+    show_file_metadata (panel);
+}
+
+/* ── Content routing ─────────────────────────────────────────── */
+
 /* Determine file type and show appropriate preview */
 static void
 update_preview_content (NemoPreviewPanel *panel)
@@ -394,9 +461,8 @@ update_preview_content (NemoPreviewPanel *panel)
     GtkIconInfo *icon_info;
     GdkPixbuf *icon_pixbuf;
 
-    if (file == NULL) {
+    if (file == NULL)
         return;
-    }
 
     name = nemo_file_get_display_name (file);
     mime_type = nemo_file_get_mime_type (file);
@@ -419,12 +485,18 @@ update_preview_content (NemoPreviewPanel *panel)
     }
 
     gtk_label_set_text (GTK_LABEL (panel->priv->name_label), name);
-    gtk_label_set_text (GTK_LABEL (panel->priv->type_label), mime_type ? mime_type : _("Unknown type"));
+    gtk_label_set_text (GTK_LABEL (panel->priv->type_label),
+                        mime_type ? mime_type : _("Unknown type"));
+
+    /* Directory preview */
+    if (nemo_file_is_directory (file)) {
+        show_directory_preview (panel);
+        goto out;
+    }
 
     /* Decide which preview to show based on mime type */
     if (mime_type != NULL) {
         if (g_str_has_prefix (mime_type, "image/")) {
-            /* It's an image — show pixbuf preview */
             show_image_preview (panel);
             show_file_metadata (panel);
             goto out;
@@ -436,7 +508,6 @@ update_preview_content (NemoPreviewPanel *panel)
             g_strcmp0 (mime_type, "application/x-shellscript") == 0 ||
             g_str_has_suffix (mime_type, "xml") ||
             g_str_has_suffix (mime_type, "yaml")) {
-            /* It's a text file — show text preview */
             show_text_preview (panel);
             show_file_metadata (panel);
             goto out;
@@ -452,7 +523,8 @@ update_preview_content (NemoPreviewPanel *panel)
         l_icon = nemo_file_get_gicon (file, 0);
         if (l_icon != NULL) {
             l_info = gtk_icon_theme_lookup_by_gicon (
-                gtk_icon_theme_get_default (), l_icon, 128, 0);
+                gtk_icon_theme_get_default (),
+                l_icon, PREVIEW_ICON_LARGE_SIZE, 0);
             if (l_info != NULL) {
                 l_pixbuf = gtk_icon_info_load_icon (l_info, NULL);
                 if (l_pixbuf != NULL) {
@@ -466,7 +538,8 @@ update_preview_content (NemoPreviewPanel *panel)
         }
         gtk_widget_show (panel->priv->preview_image);
         gtk_widget_hide (panel->priv->text_scrolled);
-        gtk_label_set_text (GTK_LABEL (panel->priv->type_label), mime_type ? mime_type : _("Unknown type"));
+        gtk_label_set_text (GTK_LABEL (panel->priv->type_label),
+                            mime_type ? mime_type : _("Unknown type"));
     }
 
     show_file_metadata (panel);
@@ -476,7 +549,8 @@ out:
     g_free (mime_type);
 }
 
-/* Show the placeholder (no file selected) */
+/* ── Placeholder (no file selected) ──────────────────────────── */
+
 static void
 show_placeholder (NemoPreviewPanel *panel)
 {
@@ -489,17 +563,16 @@ show_placeholder (NemoPreviewPanel *panel)
 
     /* Clear header */
     gtk_image_clear (GTK_IMAGE (panel->priv->icon_image));
-    gtk_label_set_text (GTK_LABEL (panel->priv->name_label), _("No file selected"));
+    gtk_label_set_text (GTK_LABEL (panel->priv->name_label),
+                        _("No file selected"));
     gtk_label_set_text (GTK_LABEL (panel->priv->type_label), "");
 
-    /* Clear metadata */
-    if (panel->priv->metadata_grid != NULL) {
-        gtk_widget_destroy (panel->priv->metadata_grid);
-        panel->priv->metadata_grid = NULL;
-    }
+    /* Hide metadata (don't destroy — it gets updated on next file) */
+    if (panel->priv->metadata_grid != NULL)
+        gtk_widget_hide (panel->priv->metadata_grid);
 }
 
-/* --- Public API --- */
+/* ── Public API ──────────────────────────────────────────────── */
 
 GtkWidget *
 nemo_preview_panel_new (void)
@@ -543,7 +616,7 @@ nemo_preview_panel_clear (NemoPreviewPanel *panel)
     show_placeholder (panel);
 }
 
-/* --- GObject boilerplate --- */
+/* ── GObject boilerplate ─────────────────────────────────────── */
 
 static void
 nemo_preview_panel_class_init (NemoPreviewPanelClass *klass)
@@ -639,8 +712,12 @@ nemo_preview_panel_init (NemoPreviewPanel *panel)
     gtk_box_pack_start (GTK_BOX (panel), panel->priv->placeholder_label,
                         TRUE, TRUE, 0);
 
-    /* Metadata grid pointer (populated dynamically) */
+    /* Metadata grid — created lazily on first show_file_metadata() */
     panel->priv->metadata_grid = NULL;
+    panel->priv->meta_type_val = NULL;
+    panel->priv->meta_size_val = NULL;
+    panel->priv->meta_location_val = NULL;
+    panel->priv->meta_info_val = NULL;
     panel->priv->current_file = NULL;
 
     /* Show the initial state */
